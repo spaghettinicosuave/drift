@@ -10,7 +10,7 @@ from typing import Callable
 import numpy as np
 
 from .dsp import Echo, Reverb
-from .presets import PRESETS
+from .presets import DEFAULT_VARIANTS, PRESETS
 from .theory import Harmony, Meter, parse_meter
 from .voices import Layer, default_layers
 
@@ -94,7 +94,9 @@ class Engine:
         self._fifo = np.zeros((0, 2), dtype=np.float32)
         self._lock = threading.Lock()
         self.room = cfg.get("room", 1.0)
-        for name, variant in {**cfg.get("variants", {}), **(variants or {})}.items():
+        names = {x.name for x in self.layers if not x.fixed_variant}
+        for name, variant in {**{k: v for k, v in DEFAULT_VARIANTS.items() if k in names},
+                              **cfg.get("variants", {}), **(variants or {})}.items():
             self.layer(name).set_variant(variant)
         for layer in self.layers:
             layer.level = max(0.0, min(1.0, (self.p[layer.param] - layer.threshold) * 2.5))
@@ -135,11 +137,11 @@ class Engine:
         return self._beat_map[pos]
 
     def default_variants(self, fade: float | None = None) -> dict[str, str]:
-        """Every layer back to its first (default) variant."""
+        """Every layer back to its default variant (DEFAULT_VARIANTS, else its first)."""
         with self._lock:
             for layer in self.layers:
                 if not layer.fixed_variant:
-                    self._switch(layer, next(iter(layer.VARIANTS)), fade)
+                    self._switch(layer, DEFAULT_VARIANTS.get(layer.name, next(iter(layer.VARIANTS))), fade)
         return self.variants()
 
     def variants(self) -> dict[str, str]:

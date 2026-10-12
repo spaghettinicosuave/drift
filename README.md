@@ -146,8 +146,10 @@ to it; the others keep whatever meter is playing.
 ## Variants
 
 Each layer has four or more variants that change both its sound and how it plays. Variants
-are independent of the seed: an Engine starts with each layer's first variant, and
-you pick others or roll dice with `reroll_variants()`. That way you can keep a sound
+are independent of the seed: an Engine starts with the default set (`DEFAULT_VARIANTS` in
+`drift/presets.py`: choir, breath, shimmer, glass, gong, reed, 808, saw, supersaw, reverse),
+presets like `meadow`, `battle` and `tavern` bring their own, and you pick others or roll
+dice with `reroll_variants()`. That way you can keep a sound
 and try it with different seeds.
 
 | layer | variants |
@@ -179,7 +181,7 @@ eng.set_variant("drone", "hurdy", fade=20)  # a slow morph, e.g. walking into a 
 eng.load("tavern", fade=12)               # preset with instruments: params glide, instruments fade
 eng.reroll_variants(keep=["drums"])       # random instruments, same music
 eng.variants()                            # {'drone': 'sub', 'pad': 'glass', ...}
-eng.default_variants()                    # each layer's first variant
+eng.default_variants()                    # back to DEFAULT_VARIANTS
 ```
 
 ## Saving a sound

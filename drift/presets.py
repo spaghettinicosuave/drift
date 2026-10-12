@@ -3,14 +3,23 @@
 Missing parameters fall back to engine.DEFAULTS (so presets without `drive` are pure ambient).
 `meter` is any time signature ("4/4" if omitted; loading a preset without one keeps the
 current meter). `variants` switch instruments when the preset is loaded; presets without
-them keep whatever instruments are playing."""
+them keep whatever instruments are playing. A new Engine starts with DEFAULT_VARIANTS."""
+
+# The instruments an Engine starts with, and what default_variants() returns to.
+DEFAULT_VARIANTS = {"drone": "choir", "pad": "breath", "swell": "shimmer", "arp": "glass",
+                    "bells": "gong", "melody": "reed", "drums": "808", "bass": "saw",
+                    "stabs": "supersaw", "riser": "reverse"}
+
+BATTLE = {"drone": "hurdy", "pad": "viols", "swell": "strings", "arp": "sequence", "bells": "gong",
+          "melody": "lead", "drums": "punchy", "bass": "reese", "stabs": "brass", "riser": "roll"}
 
 TAVERN = {"drone": "hurdy", "pad": "viols", "swell": "flute", "arp": "lute", "bells": "dulcimer",
           "melody": "hurdy", "drums": "tavern", "bass": "folk", "stabs": "strum", "riser": "roll"}
 
 PRESETS: dict[str, dict] = {
     # Open, major, unhurried.
-    "meadow": {"tempo": 72, "energy": 0.45, "tension": 0.12, "brightness": 0.55, "space": 0.6},
+    "meadow": {"tempo": 72, "energy": 0.45, "tension": 0.12, "brightness": 0.55, "space": 0.6,
+               "variants": DEFAULT_VARIANTS},
     # Busier and brighter: the Spore-city feel.
     "city": {"tempo": 88, "energy": 0.75, "tension": 0.3, "brightness": 0.7, "space": 0.45},
     # Slow, darker modes, lots of air.
@@ -25,7 +34,8 @@ PRESETS: dict[str, dict] = {
     # Boots and cats, offbeat bass, minor-ish.
     "chase": {"tempo": 118, "energy": 0.55, "drive": 0.62, "tension": 0.5, "brightness": 0.6, "space": 0.4},
     # Everything on: four-on-the-floor, rolling bass, stabs, risers.
-    "battle": {"tempo": 128, "energy": 0.7, "drive": 0.95, "tension": 0.68, "brightness": 0.75, "space": 0.35},
+    "battle": {"tempo": 128, "energy": 0.7, "drive": 0.95, "tension": 0.68, "brightness": 0.75, "space": 0.35,
+               "variants": BATTLE},
     # --- acoustic: hurdy-gurdy, lute, fiddle, frame drum
     # A slow jig in 6/8 by the fire: hurdy-gurdy over drones, lute, frame drum. Raise drive
     # for strummed chords, folk bass and drum rolls.
