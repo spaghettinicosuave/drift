@@ -85,7 +85,7 @@ def main() -> None:
 
     def start(eng: Engine) -> PygamePlayer:
         log.append(f"seed {eng.seed}")
-        return PygamePlayer(hook(eng), channel=chan).start()
+        return PygamePlayer(hook(eng), chunk=0.25, ahead=2, channel=chan).start()  # ~0.75 s to hear a change
 
     def reseed(old: Engine, seed=None) -> Engine:
         """Same params, variants and toggles; new music."""

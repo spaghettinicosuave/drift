@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import sys
 import threading
@@ -24,10 +25,16 @@ class PygamePlayer:
     the mixer's; use PygamePlayer.create() to get a matching engine automatically.
     By default it plays on channel 0 and reserves it, leaving the others to Sound.play().
     For crossfades between two players, reserve 2 channels and pass channel=0 / channel=1.
-    Parameter changes are heard after roughly `chunk` seconds.
+    Parameter changes are heard after roughly `chunk * (ahead + 1)` seconds.
+
+    Rendering and feeding the mixer happen on two threads: a renderer keeps `ahead`
+    chunks ready, and a feeder only hands them to pygame (whose channel queue holds a
+    single chunk). So a slow render, or another thread hogging Python for a moment,
+    eats into that reserve instead of being heard as a gap.
     """
 
-    def __init__(self, engine: Engine, chunk: float = 0.5, channel: int | None = None):
+    def __init__(self, engine: Engine, chunk: float = 0.5, channel: int | None = None,
+                 ahead: int = 1):
         import pygame
 
         init = pygame.mixer.get_init()
@@ -47,8 +54,13 @@ class PygamePlayer:
             pygame.mixer.set_reserved(1)  # keep Sound.play() from stealing it
         self.channel = pygame.mixer.Channel(channel)
         self.volume = 1.0
+        self.ahead = max(1, ahead)
+        self.underruns = 0  # times the queue ran dry and playback had to restart
+        self.render_ms: list[float] = []  # recent chunk render times
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._ready: collections.deque = collections.deque()
+        self._cv = threading.Condition()
+        self._threads: list[threading.Thread] = []
 
     @classmethod
     def create(cls, preset="meadow", seed=None, **kw) -> PygamePlayer:
@@ -59,35 +71,65 @@ class PygamePlayer:
         return cls(Engine(preset, sr=pygame.mixer.get_init()[0], seed=seed), **kw)
 
     def _sound(self):
+        t = time.perf_counter()
         x = self.engine.render(self.frames)
+        self.render_ms = self.render_ms[-199:] + [(time.perf_counter() - t) * 1000]
         if self.chans == 1:
             x = x.mean(axis=1, keepdims=True)
         elif self.chans > 2:
             x = np.concatenate([x, np.zeros((len(x), self.chans - 2), np.float32)], axis=1)
         return self.pg.mixer.Sound(buffer=to_int16(x).tobytes())
 
-    def _run(self):
-        ch = self.channel
-        ch.play(self._sound())
+    def _render(self):
         while not self._stop.is_set():
-            if ch.get_queue() is None:
-                ch.queue(self._sound())
-            elif not ch.get_busy():  # underrun (e.g. the game stalled): restart
-                ch.play(self._sound())
-            time.sleep(0.02)
+            with self._cv:
+                while len(self._ready) >= self.ahead and not self._stop.is_set():
+                    self._cv.wait(0.1)
+            if not self._stop.is_set():
+                sound = self._sound()
+                with self._cv:
+                    self._ready.append(sound)
+                    self._cv.notify_all()
+
+    def _next(self, wait: bool = False):
+        with self._cv:
+            if wait:
+                while not self._ready and not self._stop.is_set():
+                    self._cv.wait(0.1)
+            sound = self._ready.popleft() if self._ready else None
+            self._cv.notify_all()
+            return sound
+
+    def _feed(self):
+        ch = self.channel
+        ch.play(self._next(wait=True))
+        while not self._stop.is_set():
+            if ch.get_queue() is None and (sound := self._next()) is not None:
+                if not ch.get_busy():  # ran dry before the next chunk was ready
+                    self.underruns += 1
+                ch.queue(sound)  # starts at once on an idle channel
+            elif not ch.get_busy() and (sound := self._next()) is not None:
+                self.underruns += 1
+                ch.play(sound)
+            time.sleep(0.01)
 
     def start(self) -> PygamePlayer:
-        if not self._thread:
+        if not self._threads:
             self._stop.clear()
-            self._thread = threading.Thread(target=self._run, name="drift", daemon=True)
-            self._thread.start()
+            self._ready.clear()
+            self._threads = [threading.Thread(target=f, name=n, daemon=True)
+                             for f, n in ((self._render, "drift-render"), (self._feed, "drift-feed"))]
+            for t in self._threads:
+                t.start()
         return self
 
     def stop(self, fade_ms: int = 2000) -> None:
         self._stop.set()
-        if self._thread:
-            self._thread.join()
-            self._thread = None
+        with self._cv:
+            self._cv.notify_all()
+        for t in self._threads:
+            t.join()
+        self._threads = []
         if fade_ms:
             self.channel.fadeout(fade_ms)
         else:

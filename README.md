@@ -101,6 +101,25 @@ row. Renders happen on a worker thread. Heals, level-ups and coins play in the
 music's current key. Loud hits dip the music for half a second. `PygamePlayer`
 plays on channel 0 and reserves only that one, leaving the rest to effects.
 
+### In a game: run the audio in its own process
+
+Inside a game's process the music thread shares Python with the game loop, so a
+level load or a long frame starves it and the music hitches. `AudioServer` runs the
+music and effects in a child process (`python -m drift.server`) that keeps a second
+of music rendered ahead; the game only sends small messages and never blocks:
+
+```python
+from drift.server import AudioServer
+audio = AudioServer("cave", music_volume=0.6)
+audio.play("hit_bone", pan=0.3)
+audio.set(drive=0.7, tension=0.6)      # glided as usual
+audio.load("meadow")                   # presets, variants, meters
+audio.stats()                          # underruns, render times, key/chord
+```
+
+The child exits when the game does. `DRIFT_DISKAUDIOFILE=out.raw` records exactly
+what it plays, for checking a session for dropouts.
+
 ## Time signatures
 
 Any preset can play in any meter: `eng.set_meter("7/8")`, `M` in the demo, or
@@ -232,8 +251,9 @@ Hooks: `on_bar(ctx, bar, offset)`, `on_chord(ctx, offset)`, `on_step(ctx, step, 
 
 Calm presets render at 15-25x realtime on one core, `tavern` at about 9x and `battle`
 at about 7x (~15% of a core).
-The pygame player renders 0.5 s chunks on a thread. numpy releases the GIL for
-the heavy parts, but expect a little contention with the game's main loop.
+`PygamePlayer` renders on one thread and feeds the mixer from another, keeping
+`ahead` chunks ready, so a slow block (a riser is built whole, ~0.5 s once per
+8 bars) eats into that reserve instead of being heard. In a game, prefer `AudioServer`.
 
 ## License
 
