@@ -67,6 +67,40 @@ player.stop(fade_ms=3000)
 `Engine.render` is all a backend needs, so the same engine works with sounddevice,
 a game engine's audio callback, or offline rendering.
 
+## Sound effects
+
+`drift.sfx` synthesizes game sound effects the same way: no samples, and every call is
+a slightly different take, so repeated sounds never machine-gun.
+
+```python
+from drift import sfx
+x = sfx.render("hit_bone")                    # mono float32 at the recipe's calibrated level
+x = sfx.render("footstep", surface="grass")   # stone, dirt, grass, wood, water
+x = sfx.render("heal", key=(62, sfx.MAJOR))   # musical ones can follow a key
+```
+
+Recipes: `swing` (weight), `hit_flesh`, `hit_metal`, `hit_wood`, `hit_bone`,
+`bones_collapse`, `block`, `hurt`, `body_fall`, `cast` / `impact` (fire, ice, dark),
+`heal`, `mana`, `level_up`, `coin`, `pickup`, `footstep`, `hoof`, `snort`, `whinny`,
+`jump`, `land`, `roll`, `door_open`, `door_close`, `chest_open`, `chest_close`,
+`ui_click`, `ui_open`. Add your own with `@sfx.recipe("name", level=-20)`.
+
+Each is scaled so its loudest 50 ms sits at a set level, balanced against the others
+and against the music (about -18 dB RMS). In pygame, `SfxPlayer` adds the rest:
+
+```python
+player = PygamePlayer.create("cave").start()        # music on channel 0
+fx = sfx.SfxPlayer(music=player)
+fx.warm("swing", "hit_flesh")                       # render variations in the background
+fx.play("hit_flesh", pan=0.4, volume=0.8)           # pan -1..1
+fx.update()                                         # once a frame
+```
+
+It keeps a pool of variations per sound and never plays the same take twice in a
+row. Renders happen on a worker thread. Heals, level-ups and coins play in the
+music's current key. Loud hits dip the music for half a second. `PygamePlayer`
+plays on channel 0 and reserves only that one, leaving the rest to effects.
+
 ## Time signatures
 
 Any preset can play in any meter: `eng.set_meter("7/8")`, `M` in the demo, or

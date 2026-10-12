@@ -22,6 +22,8 @@ class PygamePlayer:
 
     pygame.mixer must already be initialised (16-bit). The engine's sample rate must match
     the mixer's; use PygamePlayer.create() to get a matching engine automatically.
+    By default it plays on channel 0 and reserves it, leaving the others to Sound.play().
+    For crossfades between two players, reserve 2 channels and pass channel=0 / channel=1.
     Parameter changes are heard after roughly `chunk` seconds.
     """
 
@@ -41,9 +43,10 @@ class PygamePlayer:
         self.chans = chans
         self.frames = int(chunk * engine.sr)
         if channel is None:
-            channel = pygame.mixer.get_num_channels() - 1
-            pygame.mixer.set_reserved(channel + 1)  # keep Sound.play() from stealing it
+            channel = 0
+            pygame.mixer.set_reserved(1)  # keep Sound.play() from stealing it
         self.channel = pygame.mixer.Channel(channel)
+        self.volume = 1.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -91,6 +94,7 @@ class PygamePlayer:
             self.channel.stop()
 
     def set_volume(self, v: float) -> None:
+        self.volume = v
         self.channel.set_volume(v)
 
 

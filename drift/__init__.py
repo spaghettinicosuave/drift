@@ -6,12 +6,13 @@
     eng.set(energy=0.8, tension=0.5)
 """
 
+from . import sfx
 from .engine import Engine, PARAMS
 from .output import PygamePlayer, load_config, save_config, stream_raw, write_wav
 from .presets import PRESETS
 from .voices import Arp, Bells, Drone, Layer, Melody, Pad, Swell, default_layers
 
 __all__ = [
-    "Engine", "PARAMS", "PRESETS", "PygamePlayer", "write_wav", "stream_raw", "save_config", "load_config",
+    "sfx", "Engine", "PARAMS", "PRESETS", "PygamePlayer", "write_wav", "stream_raw", "save_config", "load_config",
     "Layer", "Drone", "Pad", "Swell", "Arp", "Bells", "Melody", "default_layers",
 ]
