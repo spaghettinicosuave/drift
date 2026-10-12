@@ -342,41 +342,104 @@ def pickup(sr, rng, key=None):
 # ------------------------------------------------------------------ movement
 
 
+#: Per surface: the crunch under the foot as (grains, low Hz, high Hz, decay s, gain),
+#: and how much the ground gives (scales the heel thud's length). Grass is the base
+#: every other step is built from.
+GROUND = {
+    "grass": ((40, 1500, 7000, 0.05, 0.6), 1.0),
+    "dirt": ((25, 500, 4000, 0.05, 0.6), 1.0),
+    "stone": ((14, 2500, 10000, 0.02, 0.35), 0.6),
+    "wood": ((12, 1200, 6000, 0.03, 0.3), 0.8),
+}
+FOOTWEAR = ("leather", "bare", "plate")
+
+
+def _grains(sr, rng, count, lo, hi, decay, seconds=0.14):
+    """A crunch made of many tiny noise grains, front-loaded and dying away."""
+    n = int(sr * seconds)
+    out = np.zeros(n)
+    for at in np.sort(rng.integers(0, int(n * 0.6), count)):
+        _place(out, _noise(sr, 0.004, lo, hi, rng) * np.hanning(int(sr * 0.004)), at, rng.uniform(0.2, 1.0))
+    return out * np.exp(-np.arange(n) / (decay * sr))
+
+
+def _burst(sr, rng, lo, hi, attack, decay, seconds=0.08):
+    """A short filtered noise hit: knocks, slaps, clicks."""
+    return _noise(sr, seconds, lo, hi, rng) * _env(sr, seconds, attack, decay)
+
+
+def _metal_ticks(sr, rng, count, spread, gain, seconds=0.2):
+    """Loose metal touching metal: a few tiny, quickly damped inharmonic pings."""
+    out = np.zeros(int(sr * seconds))
+    for _ in range(count):
+        f = rng.uniform(2200, 6500)
+        ping = _modes(sr, 0.05, [f, f * rng.uniform(1.4, 1.7)], [0.012, 0.007], [1.0, 0.5], rng)
+        _place(out, ping + _burst(sr, rng, 3000, 12000, 0.0002, 0.002, 0.05) * 0.5,
+               rng.uniform(0, spread) * sr, rng.uniform(0.3, 1.0) * gain)
+    return out
+
+
 @recipe("footstep", level=-27)
-def footstep(sr, rng, surface="stone", weight=0.5):
-    """One step. surface: stone, dirt, grass, wood, water."""
+def footstep(sr, rng, surface="grass", weight=0.5, footwear="leather", armor=0.0):
+    """One step, as layers on the grass step: the ground under it (stone, dirt, grass,
+    wood, water), what is on the foot (leather, bare, plate) and armour rattling (0..1)."""
     heel = _thud(sr, 0.15, 110 + 40 * weight, 60, 0.025 + 0.015 * weight, rng) * (0.5 + 0.5 * weight)
-    if surface == "stone":
-        grit = _noise(sr, 0.06, 1500, 9000, rng) * _env(sr, 0.06, 0.0005, 0.012)
-        tap = _modes(sr, 0.06, [rng.uniform(900, 1400)], [0.008], [1.0], rng)
-        return _place(_place(heel * 0.6, grit, int(0.003 * sr), 0.7), tap, 0, 0.4)
-    if surface == "wood":
-        boards = _modes(sr, 0.15, [rng.uniform(170, 230), rng.uniform(420, 520)], [0.04, 0.02], [1.0, 0.4], rng)
-        return _mix(heel * 0.5, boards * 0.8)
     if surface == "water":
         splash = _noise(sr, 0.2, 400, 6000, rng) * _env(sr, 0.2, 0.01, 0.05)
         bub = sum(_modes(sr, 0.2, [rng.uniform(500, 1500)], [0.02], [1.0], rng) for _ in range(3)) * 0.2
         return _mix(heel * 0.3, splash, _place(np.zeros(int(sr * 0.2)), bub, 0.03 * sr))
-    # dirt / grass: a crunch made of many tiny grains
-    n = int(sr * 0.14)
-    grains = np.zeros(n)
-    count = 40 if surface == "grass" else 25
-    lo, hi = (1500, 7000) if surface == "grass" else (500, 4000)
-    for at in np.sort(rng.integers(0, int(n * 0.6), count)):
-        _place(grains, _noise(sr, 0.004, lo, hi, rng) * np.hanning(int(sr * 0.004)), at, rng.uniform(0.2, 1.0))
-    grains *= np.exp(-np.arange(n) / (0.05 * sr))
-    return _mix(heel * 0.6, grains * 0.6)
+    (count, lo, hi, decay, gain), give = GROUND.get(surface, GROUND["grass"])
+    bare, plate = footwear == "bare", footwear == "plate"
+    if give != 1.0:  # hard ground: the heel stops dead instead of sinking in
+        heel = _thud(sr, 0.15, 120 + 40 * weight, 70, (0.025 + 0.015 * weight) * give, rng) * (0.5 + 0.5 * weight)
+    if bare:
+        heel = _thud(sr, 0.15, 90 + 30 * weight, 55, 0.02, rng) * (0.35 + 0.35 * weight)
+    elif plate:
+        heel = heel * 1.3
+    grains = _grains(sr, rng, count, lo, hi, decay)
+    out = _mix(heel * 0.6, grains * (gain * (0.6 if bare else 1.0)))
+    if surface == "stone":
+        if not bare:  # the sole meeting rock: a dull, unpitched knock, not a tap
+            _place(out, _burst(sr, rng, 250, 1800, 0.0004, 0.007), 0, 0.45 + 0.2 * weight)
+        tail = _burst(sr, rng, 300, 3500, 0.004, 0.035, 0.12)  # the room answering
+        _place(out, tail, 0.012 * sr, 0.06)
+    elif surface == "wood":
+        boards = _burst(sr, rng, 120, 700, 0.002, 0.03, 0.12)
+        _place(out, _mix(boards, _modes(sr, 0.12, [rng.uniform(150, 220)], [0.03], [0.3], rng)), 0, 0.5)
+    if bare:  # skin on the ground: a soft slap, heel then ball of the foot
+        _place(out, _burst(sr, rng, 400, 3000, 0.0005, 0.006), 0, 0.3)
+        _place(out, _burst(sr, rng, 500, 3500, 0.001, 0.008), rng.uniform(0.05, 0.08) * sr, 0.15)
+    elif plate:  # a steel shoe: a short clank, then the plates settling
+        clank = _modes(sr, 0.12, [rng.uniform(1500, 2100), rng.uniform(3200, 4200), rng.uniform(5200, 6400)],
+                       [0.02, 0.012, 0.008], [0.6, 0.4, 0.25], rng)
+        _place(out, _mix(clank, _burst(sr, rng, 2000, 10000, 0.0002, 0.003) * 0.6), 0, 0.35)
+        armor = max(armor, 0.6)
+    if armor > 0:
+        _place(out, _metal_ticks(sr, rng, 2 + int(4 * armor), 0.09, 0.12 * armor), 0.01 * sr)
+    return out
 
 
 @recipe("hoof", level=-24)
-def hoof(sr, rng, surface="stone"):
-    """One horseshoe strike: a hollow knock, ringing a little on stone."""
-    knock = _modes(sr, 0.15, [rng.uniform(450, 600), rng.uniform(1100, 1400)], [0.02, 0.01], [1.0, 0.5], rng)
-    out = knock + _thud(sr, 0.15, 160, 70, 0.03, rng) * 0.7
-    if surface == "stone":
-        out += _modes(sr, 0.15, [rng.uniform(2500, 3500)], [0.03], [0.25], rng)
-    elif surface in ("grass", "dirt"):
-        out = out * 0.5 + _noise(sr, 0.15, 300, 3000, rng) * _env(sr, 0.15, 0.001, 0.02) * 0.4
+def hoof(sr, rng, surface="grass", pair=True):
+    """One beat of a trot: a pair of hooves landing almost together (diagonal legs).
+    The weight of a horse in the ground, plus an iron shoe's click on hard surfaces."""
+    (count, lo, hi, decay, gain), give = GROUND.get(surface, GROUND["grass"])
+    hard = surface in ("stone", "wood")
+
+    def strike():
+        body = _thud(sr, 0.2, 95, 42, 0.035 * give + 0.01, rng)
+        turf = _grains(sr, rng, int(count * 1.5), lo * 0.7, hi * 0.8, decay * 1.3, 0.18)
+        out = _mix(body * (0.6 if hard else 1.0), turf * gain * 1.3)
+        if hard:  # iron on rock: a click with only a breath of ring
+            click = _burst(sr, rng, 1800, 11000, 0.0002, 0.003)
+            ring = _modes(sr, 0.06, [rng.uniform(2600, 3600), rng.uniform(4800, 6200)], [0.01, 0.006], [1, 0.6], rng)
+            _place(out, _mix(click, ring * 0.12), 0, 0.7)
+            _place(out, _burst(sr, rng, 300, 3500, 0.004, 0.04, 0.12), 0.012 * sr, 0.08)
+        return out
+
+    out = _place(np.zeros(int(sr * 0.26)), strike(), 0)
+    if pair:
+        _place(out, strike(), rng.uniform(0.015, 0.035) * sr, rng.uniform(0.55, 0.8))
     return out
 
 
@@ -416,7 +479,7 @@ def jump(sr, rng):
 
 
 @recipe("land", level=-22)
-def land(sr, rng, surface="stone"):
+def land(sr, rng, surface="grass"):
     return _mix(footstep(sr, rng, surface=surface, weight=1.0), _thud(sr, 0.15, 90, 50, 0.05, rng) * 0.5)
 
 

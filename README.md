@@ -75,13 +75,14 @@ a slightly different take, so repeated sounds never machine-gun.
 ```python
 from drift import sfx
 x = sfx.render("hit_bone")                    # mono float32 at the recipe's calibrated level
-x = sfx.render("footstep", surface="grass")   # stone, dirt, grass, wood, water
+x = sfx.render("footstep", surface="stone", footwear="plate", armor=0.5)
 x = sfx.render("heal", key=(62, sfx.MAJOR))   # musical ones can follow a key
 ```
 
 Recipes: `swing` (weight), `hit_flesh`, `hit_metal`, `hit_wood`, `hit_bone`,
 `bones_collapse`, `block`, `hurt`, `body_fall`, `cast` / `impact` (fire, ice, dark),
-`heal`, `mana`, `level_up`, `coin`, `pickup`, `footstep`, `hoof`, `snort`, `whinny`,
+`heal`, `mana`, `level_up`, `coin`, `pickup`, `footstep` (surface: grass, dirt, stone, wood,
+water; footwear: leather, bare, plate; armor 0..1), `hoof` (one trot beat), `snort`, `whinny`,
 `jump`, `land`, `roll`, `door_open`, `door_close`, `chest_open`, `chest_close`,
 `ui_click`, `ui_open`. Add your own with `@sfx.recipe("name", level=-20)`.
 
