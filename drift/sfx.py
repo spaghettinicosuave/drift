@@ -625,8 +625,10 @@ def jump(sr, rng):
 
 
 @recipe("land", level=-22)
-def land(sr, rng, surface="grass"):
-    return _mix(footstep(sr, rng, surface=surface, weight=1.0), _thud(sr, 0.15, 90, 50, 0.05, rng) * 0.5)
+def land(sr, rng, surface="grass", footwear="leather", armor=0.0):
+    """Both feet back on the ground: a full-weight step and the body's thump."""
+    return _mix(footstep(sr, rng, surface=surface, weight=1.0, footwear=footwear, armor=armor),
+                _thud(sr, 0.15, 90, 50, 0.05, rng) * 0.5)
 
 
 @recipe("roll", level=-25)
