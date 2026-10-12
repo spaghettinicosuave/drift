@@ -9,11 +9,18 @@ Recipes are plain functions (sr, rng, **params) -> mono array, registered with @
 Each output is scaled so its loudest 50 ms sits at the recipe's `level` (dB RMS), which
 keeps effects balanced against each other and against the music (the Engine aims for
 about -18 dB RMS). SfxPlayer (pygame) adds variation pools, panning and music ducking.
+
+**Tuning.** Every recipe takes the knobs in `POST` (gain, pitch, low and high cut), and
+some declare their own with `knobs()` (the layers of a footstep, say). Values that
+differ from the defaults live in `sfx_tuning.json` next to this file, which `sfx_lab.py`
+edits by ear; `load_tuning()` re-reads it (drift.server does so when it changes).
 """
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 from typing import Callable
 
@@ -26,6 +33,79 @@ MINOR = (0, 2, 3, 5, 7, 8, 10)
 SURFACES = ("stone", "dirt", "grass", "wood", "water")
 
 RECIPES: dict[str, tuple[Callable, float]] = {}
+
+#: recipe -> knob -> (default, low, high, what it does). Declared with knobs().
+KNOBS: dict[str, dict[str, tuple]] = {}
+#: Knobs every recipe has, applied to the finished sound.
+POST = {
+    "gain_db": (0.0, -18.0, 12.0, "louder / quieter than the calibrated level, dB"),
+    "pitch": (0.0, -12.0, 12.0, "semitones (also shortens / stretches it)"),
+    "low_cut": (0.0, 0.0, 2000.0, "remove rumble below, Hz (0 = off)"),
+    "high_cut": (20000.0, 500.0, 20000.0, "remove fizz above, Hz (20000 = off)"),
+}
+#: recipe -> knob -> value, only where it differs from the default.
+TUNING: dict[str, dict[str, float]] = {}
+TUNING_PATH = os.environ.get("DRIFT_SFX_TUNING") or os.path.join(os.path.dirname(__file__), "sfx_tuning.json")
+
+
+def knobs(recipe_name: str, **spec: tuple) -> None:
+    """Declare a recipe's tunable constants: name=(default, low, high, description)."""
+    KNOBS[recipe_name] = spec
+
+
+class _Knobs(dict):
+    __getattr__ = dict.__getitem__
+
+
+def tuned(recipe_name: str) -> _Knobs:
+    """The recipe's knob values: tuning where set, defaults otherwise (k.name)."""
+    t = TUNING.get(recipe_name, {})
+    return _Knobs({k: t.get(k, d[0]) for k, d in KNOBS.get(recipe_name, {}).items()})
+
+
+def load_tuning(path: str | None = None) -> dict:
+    global TUNING
+    try:
+        with open(path or TUNING_PATH) as f:
+            TUNING = {k: dict(v) for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        TUNING = {}
+    return TUNING
+
+
+def save_tuning(path: str | None = None) -> str:
+    """Write the tuning, dropping values equal to their defaults."""
+    out = {}
+    for name, vals in sorted(TUNING.items()):
+        spec = {**KNOBS.get(name, {}), **POST}
+        keep = {k: v for k, v in sorted(vals.items()) if k in spec and v != spec[k][0]}
+        if keep:
+            out[name] = keep
+    path = path or TUNING_PATH
+    with open(path, "w") as f:
+        json.dump(out, f, indent=2)
+        f.write("\n")
+    return path
+
+
+def _soft_filter(x, sr, low=0.0, high=20000.0):
+    spec = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1.0 / sr) + 1e-9
+    if low > 0:
+        spec *= (f / np.sqrt(f**2 + low**2)) ** 2
+    if high < 20000:
+        spec /= 1.0 + (f / high) ** 4
+    return np.fft.irfft(spec, len(x))
+
+
+def _post(x, sr, t):
+    """The POST knobs, skipped entirely at their defaults."""
+    if t.get("pitch", 0.0):
+        r = 2 ** (t["pitch"] / 12)
+        x = np.interp(np.arange(0, len(x) - 1, r), np.arange(len(x)), x)
+    if t.get("low_cut", 0.0) > 0 or t.get("high_cut", 20000.0) < 20000:
+        x = _soft_filter(x, sr, t.get("low_cut", 0.0), t.get("high_cut", 20000.0))
+    return x
 
 
 def recipe(name: str, level: float):
@@ -40,9 +120,12 @@ def render(name: str, sr: int = 44100, rng: np.random.Generator | None = None, *
     fn, level = RECIPES[name]
     rng = rng if rng is not None else np.random.default_rng()
     x = np.asarray(fn(sr, rng, **params), dtype=np.float64)
+    t = TUNING.get(name, {})
+    x = _post(x, sr, t)
     fade = min(len(x) // 4, int(0.004 * sr))
     if fade:
         x[-fade:] *= np.linspace(1.0, 0.0, fade)
+    level += t.get("gain_db", 0.0)
     return (x * (10 ** (level / 20) / max(loudness(x, sr), 1e-9))).astype(np.float32)
 
 
@@ -368,21 +451,53 @@ def _burst(sr, rng, lo, hi, attack, decay, seconds=0.08):
     return _noise(sr, seconds, lo, hi, rng) * _env(sr, seconds, attack, decay)
 
 
-def _metal_ticks(sr, rng, count, spread, gain, seconds=0.2):
+def _metal_ticks(sr, rng, count, spread, gain, seconds=0.2, pitch=1.0, ring=1.0):
     """Loose metal touching metal: a few tiny, quickly damped inharmonic pings."""
     out = np.zeros(int(sr * seconds))
     for _ in range(count):
-        f = rng.uniform(2200, 6500)
-        ping = _modes(sr, 0.05, [f, f * rng.uniform(1.4, 1.7)], [0.012, 0.007], [1.0, 0.5], rng)
+        f = rng.uniform(2200, 6500) * pitch
+        ping = _modes(sr, 0.05, [f, f * rng.uniform(1.4, 1.7)], [0.012 * ring, 0.007 * ring], [1.0, 0.5], rng)
         _place(out, ping + _burst(sr, rng, 3000, 12000, 0.0002, 0.002, 0.05) * 0.5,
                rng.uniform(0, spread) * sr, rng.uniform(0.3, 1.0) * gain)
     return out
+
+
+OFF = 20000  # a tone (lowpass) knob at this value does nothing
+
+knobs(
+    "footstep",
+    heel=(0.6, 0.0, 1.5, "heel thud level"),
+    crunch=(1.0, 0.0, 3.0, "ground grain level (x)"),
+    knock=(0.45, 0.0, 1.5, "stone: the sole's knock, level"),
+    knock_lo=(250, 50, 2000, "stone: knock band low edge, Hz"),
+    knock_hi=(1800, 300, 8000, "stone: knock band high edge, Hz"),
+    knock_decay=(0.007, 0.001, 0.05, "stone: knock length, s"),
+    room=(0.06, 0.0, 0.5, "stone: the room answering, level"),
+    boards=(0.5, 0.0, 1.5, "wood: boards level"),
+    slap=(0.3, 0.0, 1.0, "bare: skin slap level"),
+    plate_heel=(1.3, 0.5, 3.0, "plate: heel weight (x)"),
+    plate_clank=(0.35, 0.0, 1.5, "plate: ringing clank level"),
+    plate_pitch=(1.0, 0.25, 2.0, "plate: clank pitch (x)"),
+    plate_ring=(1.0, 0.1, 4.0, "plate: clank ring length (x)"),
+    plate_click=(0.6, 0.0, 2.0, "plate: contact click level"),
+    plate_tone=(OFF, 500, OFF, "plate: lowpass on clank + click, Hz"),
+    plate_dull=(0.0, 0.0, 1.5, "plate: dull unpitched metal thunk, level"),
+    plate_dull_lo=(300, 50, 3000, "plate: thunk band low edge, Hz"),
+    plate_dull_hi=(2500, 500, 10000, "plate: thunk band high edge, Hz"),
+    plate_dull_decay=(0.025, 0.003, 0.1, "plate: thunk length, s"),
+    rattle=(0.12, 0.0, 0.6, "armour rattle level (scaled by armour)"),
+    rattle_pitch=(1.0, 0.25, 2.0, "armour rattle pitch (x)"),
+    rattle_ring=(1.0, 0.1, 4.0, "armour rattle ring length (x)"),
+    rattle_spread=(0.09, 0.01, 0.3, "armour rattle spread in time, s"),
+    rattle_tone=(OFF, 500, OFF, "armour rattle lowpass, Hz"),
+)
 
 
 @recipe("footstep", level=-27)
 def footstep(sr, rng, surface="grass", weight=0.5, footwear="leather", armor=0.0):
     """One step, as layers on the grass step: the ground under it (stone, dirt, grass,
     wood, water), what is on the foot (leather, bare, plate) and armour rattling (0..1)."""
+    k = tuned("footstep")
     heel = _thud(sr, 0.15, 110 + 40 * weight, 60, 0.025 + 0.015 * weight, rng) * (0.5 + 0.5 * weight)
     if surface == "water":
         splash = _noise(sr, 0.2, 400, 6000, rng) * _env(sr, 0.2, 0.01, 0.05)
@@ -395,51 +510,82 @@ def footstep(sr, rng, surface="grass", weight=0.5, footwear="leather", armor=0.0
     if bare:
         heel = _thud(sr, 0.15, 90 + 30 * weight, 55, 0.02, rng) * (0.35 + 0.35 * weight)
     elif plate:
-        heel = heel * 1.3
+        heel = heel * k.plate_heel
     grains = _grains(sr, rng, count, lo, hi, decay)
-    out = _mix(heel * 0.6, grains * (gain * (0.6 if bare else 1.0)))
+    out = _mix(heel * k.heel, grains * (gain * (0.6 if bare else 1.0) * k.crunch))
     if surface == "stone":
         if not bare:  # the sole meeting rock: a dull, unpitched knock, not a tap
-            _place(out, _burst(sr, rng, 250, 1800, 0.0004, 0.007), 0, 0.45 + 0.2 * weight)
+            _place(out, _burst(sr, rng, k.knock_lo, k.knock_hi, 0.0004, k.knock_decay), 0, k.knock + 0.2 * weight)
         tail = _burst(sr, rng, 300, 3500, 0.004, 0.035, 0.12)  # the room answering
-        _place(out, tail, 0.012 * sr, 0.06)
+        _place(out, tail, 0.012 * sr, k.room)
     elif surface == "wood":
         boards = _burst(sr, rng, 120, 700, 0.002, 0.03, 0.12)
-        _place(out, _mix(boards, _modes(sr, 0.12, [rng.uniform(150, 220)], [0.03], [0.3], rng)), 0, 0.5)
+        _place(out, _mix(boards, _modes(sr, 0.12, [rng.uniform(150, 220)], [0.03], [0.3], rng)), 0, k.boards)
     if bare:  # skin on the ground: a soft slap, heel then ball of the foot
-        _place(out, _burst(sr, rng, 400, 3000, 0.0005, 0.006), 0, 0.3)
-        _place(out, _burst(sr, rng, 500, 3500, 0.001, 0.008), rng.uniform(0.05, 0.08) * sr, 0.15)
+        _place(out, _burst(sr, rng, 400, 3000, 0.0005, 0.006), 0, k.slap)
+        _place(out, _burst(sr, rng, 500, 3500, 0.001, 0.008), rng.uniform(0.05, 0.08) * sr, k.slap / 2)
     elif plate:  # a steel shoe: a short clank, then the plates settling
-        clank = _modes(sr, 0.12, [rng.uniform(1500, 2100), rng.uniform(3200, 4200), rng.uniform(5200, 6400)],
-                       [0.02, 0.012, 0.008], [0.6, 0.4, 0.25], rng)
-        _place(out, _mix(clank, _burst(sr, rng, 2000, 10000, 0.0002, 0.003) * 0.6), 0, 0.35)
+        p, r = k.plate_pitch, k.plate_ring
+        clank = _modes(sr, 0.12 * max(1.0, r),
+                       [rng.uniform(1500, 2100) * p, rng.uniform(3200, 4200) * p, rng.uniform(5200, 6400) * p],
+                       [0.02 * r, 0.012 * r, 0.008 * r], [0.6, 0.4, 0.25], rng)
+        metal = _mix(clank * (k.plate_clank / 0.35), _burst(sr, rng, 2000, 10000, 0.0002, 0.003) * k.plate_click)
+        if k.plate_tone < OFF:
+            metal = _soft_filter(metal, sr, high=k.plate_tone)
+        _place(out, metal, 0, 0.35)
+        if k.plate_dull > 0:
+            _place(out, _burst(sr, rng, k.plate_dull_lo, k.plate_dull_hi, 0.0004, k.plate_dull_decay, 0.15), 0, k.plate_dull)
         armor = max(armor, 0.6)
     if armor > 0:
-        _place(out, _metal_ticks(sr, rng, 2 + int(4 * armor), 0.09, 0.12 * armor), 0.01 * sr)
+        ticks = _metal_ticks(sr, rng, 2 + int(4 * armor), k.rattle_spread, k.rattle * armor,
+                             pitch=k.rattle_pitch, ring=k.rattle_ring)
+        if k.rattle_tone < OFF:
+            ticks = _soft_filter(ticks, sr, high=k.rattle_tone)
+        _place(out, ticks, 0.01 * sr)
     return out
+
+
+knobs(
+    "hoof",
+    thump=(1.0, 0.0, 3.0, "the weight landing, level (x)"),
+    thump_pitch=(1.0, 0.5, 2.0, "the weight landing, pitch (x)"),
+    turf=(1.3, 0.0, 4.0, "ground crunch level"),
+    click=(0.7, 0.0, 2.0, "hard ground: iron shoe click level"),
+    ring=(0.12, 0.0, 1.0, "hard ground: shoe ring level"),
+    click_tone=(OFF, 500, OFF, "hard ground: lowpass on click + ring, Hz"),
+    room=(0.08, 0.0, 0.5, "hard ground: room answering, level"),
+    gap_min=(0.015, 0.0, 0.08, "second hoof of the pair: earliest, s"),
+    gap_max=(0.035, 0.0, 0.12, "second hoof of the pair: latest, s"),
+    second_min=(0.55, 0.0, 1.2, "second hoof of the pair: quietest"),
+    second_max=(0.8, 0.0, 1.2, "second hoof of the pair: loudest"),
+)
 
 
 @recipe("hoof", level=-24)
 def hoof(sr, rng, surface="grass", pair=True):
     """One beat of a trot: a pair of hooves landing almost together (diagonal legs).
     The weight of a horse in the ground, plus an iron shoe's click on hard surfaces."""
+    k = tuned("hoof")
     (count, lo, hi, decay, gain), give = GROUND.get(surface, GROUND["grass"])
     hard = surface in ("stone", "wood")
 
     def strike():
-        body = _thud(sr, 0.2, 95, 42, 0.035 * give + 0.01, rng)
+        body = _thud(sr, 0.2, 95 * k.thump_pitch, 42 * k.thump_pitch, 0.035 * give + 0.01, rng)
         turf = _grains(sr, rng, int(count * 1.5), lo * 0.7, hi * 0.8, decay * 1.3, 0.18)
-        out = _mix(body * (0.6 if hard else 1.0), turf * gain * 1.3)
+        out = _mix(body * ((0.6 if hard else 1.0) * k.thump), turf * gain * k.turf)
         if hard:  # iron on rock: a click with only a breath of ring
             click = _burst(sr, rng, 1800, 11000, 0.0002, 0.003)
             ring = _modes(sr, 0.06, [rng.uniform(2600, 3600), rng.uniform(4800, 6200)], [0.01, 0.006], [1, 0.6], rng)
-            _place(out, _mix(click, ring * 0.12), 0, 0.7)
-            _place(out, _burst(sr, rng, 300, 3500, 0.004, 0.04, 0.12), 0.012 * sr, 0.08)
+            shoe = _mix(click, ring * k.ring)
+            if k.click_tone < OFF:
+                shoe = _soft_filter(shoe, sr, high=k.click_tone)
+            _place(out, shoe, 0, k.click)
+            _place(out, _burst(sr, rng, 300, 3500, 0.004, 0.04, 0.12), 0.012 * sr, k.room)
         return out
 
-    out = _place(np.zeros(int(sr * 0.26)), strike(), 0)
+    out = _place(np.zeros(int(sr * max(0.26, k.gap_max + 0.2))), strike(), 0)
     if pair:
-        _place(out, strike(), rng.uniform(0.015, 0.035) * sr, rng.uniform(0.55, 0.8))
+        _place(out, strike(), rng.uniform(k.gap_min, k.gap_max) * sr, rng.uniform(k.second_min, k.second_max))
     return out
 
 
@@ -679,6 +825,13 @@ class SfxPlayer:
             self._duck_t = now
         return ch
 
+    def clear(self) -> None:
+        """Forget every rendered take (after the tuning changed); they re-render on use."""
+        with self._lock:
+            self._pool.clear()
+            self._latest.clear()
+            self._last.clear()
+
     def update(self) -> None:
         """Call once a frame: eases the music back up after a duck (~0.6 s)."""
         if self.music is None or not hasattr(self.music, "channel"):
@@ -690,3 +843,6 @@ class SfxPlayer:
         if duck == 0.0:
             self._duck = 0.0
         self.music.channel.set_volume(getattr(self.music, "volume", 1.0) * (1.0 - duck))
+
+
+load_tuning()

@@ -102,6 +102,15 @@ row. Renders happen on a worker thread. Heals, level-ups and coins play in the
 music's current key. Loud hits dip the music for half a second. `PygamePlayer`
 plays on channel 0 and reserves only that one, leaving the rest to effects.
 
+### Tuning by ear
+
+`python sfx_lab.py [recipe]` opens a lab: pick a recipe and its parameters (surface,
+footwear...), drag knobs, and hear a fresh take each time, or repeat at walking pace
+(R), over the music (M), against the defaults (B). Every recipe has gain, pitch, low
+cut and high cut, and some have knobs for their layers (`sfx.knobs()`). S saves the
+changes to `drift/sfx_tuning.json`; `drift.server` reloads it within a second, so a
+running game picks it up.
+
 ### In a game: run the audio in its own process
 
 Inside a game's process the music thread shares Python with the game loop, so a

@@ -128,8 +128,21 @@ def _serve(cfg: dict) -> None:
             inbox.put(line)
         inbox.put(None)  # the game went away
 
+    def mtime():
+        try:
+            return os.stat(sfxmod.TUNING_PATH).st_mtime
+        except OSError:
+            return None
+
     threading.Thread(target=read, daemon=True).start()
+    tuning, checked = mtime(), time.monotonic()
     while True:
+        if time.monotonic() - checked > 1.0:  # sfx_lab saved: hear it without a restart
+            checked = time.monotonic()
+            if (m := mtime()) != tuning:
+                tuning = m
+                sfxmod.load_tuning()
+                fx.clear()
         try:
             line = inbox.get(timeout=0.01)
         except queue.Empty:
