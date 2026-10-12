@@ -1,0 +1,31 @@
+{
+  "block": {
+    "high_cut": 1550.0
+  },
+  "coin": {
+    "high_cut": 800.0,
+    "low_cut": 2000.0,
+    "pitch": -8.12
+  },
+  "footstep": {
+    "boards": 1.015,
+    "plate_click": 0.631,
+    "plate_dull": 0.762,
+    "plate_dull_decay": 0.0179,
+    "plate_dull_hi": 1012.0,
+    "plate_dull_lo": 209.0,
+    "plate_heel": 2.433,
+    "plate_ring": 0.355,
+    "plate_tone": 2225.0,
+    "rattle": 0.187,
+    "rattle_pitch": 0.358,
+    "rattle_ring": 1.39,
+    "rattle_spread": 0.01,
+    "rattle_tone": 1025.0
+  },
+  "whinny": {
+    "high_cut": 696.0,
+    "low_cut": 1077.0,
+    "pitch": -0.48
+  }
+}
