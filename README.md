@@ -6,7 +6,7 @@ parameters. Pure numpy; pygame is optional. In the spirit of Spore's procedural 
 ## Try it
 
 ```sh
-python demo.py            # needs pygame-ce with mixer (e.g. the qwen venv)
+python demo.py            # needs pygame-ce with mixer
 python -m drift wav out.wav --preset night --seconds 180 --variant drums=808 --variant pad=bloom
 python -m drift wav out.wav --config configs/drift-4242-20261010-172855.json
 python -m drift raw --preset city | pw-play --rate 44100 --channels 2 --format s16 -
