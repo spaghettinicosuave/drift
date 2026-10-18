@@ -13,6 +13,10 @@ DEFAULT_VARIANTS = {"drone": "choir", "pad": "breath", "swell": "shimmer", "arp"
 BATTLE = {"drone": "hurdy", "pad": "viols", "swell": "strings", "arp": "sequence", "bells": "gong",
           "melody": "lead", "drums": "punchy", "bass": "reese", "stabs": "brass", "riser": "roll"}
 
+# Italo disco: four-on-the-floor, dense chorus pad, sequenced lead, cowbell offbeats, gated bass.
+ITALO = {"drone": "brasspad", "pad": "italo", "swell": "rise", "arp": "sequence", "bells": "gong",
+         "melody": "lead", "drums": "italo", "bass": "italo", "stabs": "italo", "riser": "sweep"}
+
 TAVERN = {"drone": "hurdy", "pad": "viols", "swell": "flute", "arp": "lute", "bells": "dulcimer",
           "melody": "hurdy", "drums": "tavern", "bass": "folk", "stabs": "strum", "riser": "roll"}
 
@@ -45,4 +49,8 @@ PRESETS: dict[str, dict] = {
     "hearth": {"tempo": 62, "meter": "3/4", "energy": 0.42, "drive": 0.2, "tension": 0.3,
                "brightness": 0.45, "space": 0.45, "room": 0.8,
                "variants": {**TAVERN, "melody": "recorder", "drone": "hurdy"}},
+    # Italo disco: four-on-the-floor, supersaw pads, sequenced arp, punchy 808 + clap, driving saw bass.
+    # Minor-leaning dorian (tension ~0.45) with airy brightness; raise drive to go full dancefloor.
+    "italo": {"tempo": 126, "energy": 0.72, "drive": 0.85, "tension": 0.45, "brightness": 0.72, "space": 0.5,
+              "variants": ITALO},
 }

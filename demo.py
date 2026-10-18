@@ -25,6 +25,7 @@ import pygame
 
 from drift import PARAMS, PRESETS, Engine, PygamePlayer, load_config, save_config
 from drift.engine import METERS
+from drift.voices import Drums
 
 STEP = {"tempo": 4.0, "energy": 0.05, "drive": 0.05, "tension": 0.05, "brightness": 0.05, "space": 0.05, "volume": 0.05}
 LIMITS = {"tempo": (40.0, 140.0)}
@@ -195,6 +196,19 @@ def main() -> None:
                     layer.enabled = not layer.enabled
                     if not layer.enabled:
                         layer.release_all()
+            elif ev.key in (pygame.K_h, pygame.K_a):
+                drums = next((l for l in eng.layers if isinstance(l, Drums)), None)
+                if drums is not None:
+                    if ev.key == pygame.K_h:
+                        kinds = list(Drums._HAT_BUILDERS)
+                        nxt = kinds[(kinds.index(drums.v.get("hat_kind", "hat")) + 1) % len(kinds)]
+                        drums.set_hat(nxt)
+                        log.append(f"drums hat -> {nxt}")
+                    else:
+                        kinds = list(Drums._ACCENT_BUILDERS)
+                        nxt = kinds[(kinds.index(drums.v.get("accent_kind", "ohat")) + 1) % len(kinds)]
+                        drums.set_accent(nxt)
+                        log.append(f"drums accent -> {nxt}")
             elif ev.key == pygame.K_m and shift:
                 meter_input = ""
             elif ev.key == pygame.K_m:
@@ -258,7 +272,13 @@ def main() -> None:
             sounding = any(not n.finished for n in layer.notes)
             pygame.draw.circle(screen, ACC if sounding else BAR, (432, y + 9), 5)
             screen.blit(font.render(f"{key} {layer.name:<7}", True, col), (444, y))
-            screen.blit(font.render(layer.variant, True, DIM), (564, y))
+            if isinstance(layer, Drums):
+                hat = layer.v.get("hat_kind", "hat")
+                acc = layer.v.get("accent_kind", "ohat")
+                sub = f"{layer.variant}  H:{hat} A:{acc}"
+            else:
+                sub = layer.variant
+            screen.blit(font.render(sub, True, DIM), (564, y))
             pygame.draw.rect(screen, BAR, (690, y + 4, 150, 10))
             if layer.enabled:
                 pygame.draw.rect(screen, ACC, (690, y + 4, int(150 * layer.level), 10))
@@ -272,7 +292,7 @@ def main() -> None:
         for i, line in enumerate([
             "arrows: params   Q-P: toggle layer   Ctrl+Q-P: solo   Shift+Q-P: next variant",
             "V: re-roll variants   D: default variants   N: new seed   G: go to seed",
-            "M: time signature (Shift+M: type one)   C: copy seed   S: save config",
+            "M: time sig (Shift+M: type)   C: copy seed   S: save   H/A: drums hat/accent",
             "  ".join(presets[:5]),
             "  ".join(presets[5:]),
         ]):

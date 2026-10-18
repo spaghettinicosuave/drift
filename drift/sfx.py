@@ -823,7 +823,7 @@ class SfxPlayer:
         if name in self.LOUD and self.music is not None:
             held = now - self._duck_t
             current = self._duck * max(0.0, 1.0 - held / 0.6)
-            self._duck = max(current, self.duck_depth * min(1.0, volume))
+            self._duck = max(current, self.duck_depth * min(1.0, volume * self.volume))
             self._duck_t = now
         return ch
 

@@ -393,6 +393,33 @@ def _band_noise_filter(x: np.ndarray, sr: int, lo: float) -> np.ndarray:
     return np.fft.irfft(spec * (f / np.sqrt(f**2 + lo**2)) ** 4, len(x))
 
 
+def rim(sr: int, rng: np.random.Generator, decay: float = 0.06) -> Sample:
+    """Dry rimshot: a short wooden crack from a snare rim hit. Useful as a tight offbeat accent."""
+    n = int(sr * decay * 5)
+    t = np.arange(n) / sr
+    # Two slightly detuned tones (the two nodes of the rim) plus a burst of noise.
+    body = np.sin(TAU * 1050.0 * t) * 0.6 + np.sin(TAU * 1480.0 * t) * 0.4
+    noise = _band_noise(n, sr, 1500, 9000, rng) * 0.5
+    env = np.exp(-t / decay)
+    click = _band_noise(n, sr, 3000, 12000, rng) * np.exp(-t / 0.003)
+    return Sample((body + noise + click) * env)
+
+
+def cowbell(sr: int, rng: np.random.Generator, decay: float = 0.22) -> Sample:
+    """808-style cowbell: two square-wave oscillators (561 Hz + 845 Hz) into a band-pass,
+    with a short noise transient at the strike. The beat ratio 1:1.506 gives the
+    characteristic metallic clang. Used as the offbeat accent in Euro/italo grooves."""
+    n = int(sr * decay * 5)
+    t = np.arange(n) / sr
+    sq = lambda f: np.sign(np.sin(TAU * f * t))  # square wave
+    body = sq(561.0) + 0.7 * sq(845.0)
+    body = _band_noise_filter(body, sr, 400.0)
+    body = body / (np.abs(body).max() + 1e-9)
+    env = np.exp(-t / decay)
+    click = _band_noise(n, sr, 2000, 8000, rng) * np.exp(-t / 0.003) * 0.3
+    return Sample(body * env + click)
+
+
 def crash(sr: int, rng: np.random.Generator, decay: float = 1.3) -> Sample:
     n = int(sr * decay * 4)
     t = np.arange(n) / sr

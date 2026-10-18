@@ -198,6 +198,15 @@ class Drone(Layer):
             timbre=lambda b: dsp.Wave(dsp.harmonic_amps(28, 0.65 + 0.25 * b), unison=((0, 1.0), (3, 0.6)),
                                       formants=HURDY_BODY),
         ),
+        "brasspad": dict(  # low synth-brass pad: spectrum opens on attack then sustains wide; italo sub-anchor
+            center=36, attack=1.2, trem=(0.18, 0.06), fifth=True, gain=1.1, reverb=0.35,
+            timbre=lambda b: dsp.Wave(
+                dsp.harmonic_amps(4, 0.1),
+                unison=((-12, 1.0), (-5, 0.8), (0, 0.9), (5, 0.8), (12, 1.0)),
+                dark=dsp.harmonic_amps(22, 0.5 + 0.4 * b),
+                morph=0.6,
+            ),
+        ),
     }
 
     def __init__(self, **kw):
@@ -286,6 +295,13 @@ class Pad(Layer):
             attack=(2.0, 4.0), trem=0.2, voices=4, spread=4.5, gain=1.1,
             timbre=lambda b, a: dsp.Wave(dsp.harmonic_amps(3, 0.1), unison=((-8, 1.0), (8, 1.0)),
                                          dark=dsp.harmonic_amps(10 + int(14 * b), 0.5 + 0.45 * b), morph=a * 0.8),
+        ),
+        "italo": dict(  # dense chorus supersaw: 7 detuned saws beating slowly against each other, hard stereo spread
+            attack=(0.8, 1.8), trem=0.04, trem_rate=(0.08, 0.15), voices=4, spread=5.0, gain=0.72,
+            timbre=lambda b, a: dsp.Wave(
+                dsp.harmonic_amps(28, 0.45 + 0.45 * b),
+                unison=((-22, 0.7), (-14, 1.0), (-7, 0.9), (0, 1.0), (7, 0.9), (14, 1.0), (22, 0.7)),
+            ),
         ),
     }
 
@@ -670,6 +686,8 @@ class Drums(Layer):
 
     # Kits: kick (punch, decay, drive), snare (tone, decay, brightness), hats (closed, open, brightness),
     # mix = per-voice level multipliers, swing = delay of off-16ths as a fraction of a step.
+    # hat_kind: sound used for closed hits ("hat", "tambourine", "rim").
+    # accent_kind: sound used for offbeat accent slot ("ohat", "cowbell", "rim", "tambourine").
     VARIANTS = {
         "punchy": dict(kick=(1.0, 0.35, 1.6), snare=(190, 0.16, 0.5), hats=(0.04, 0.22, 0.5),
                        mix=dict(snare=1.0, clap=1.0, hat=1.0, ohat=1.0), swing=0.0),
@@ -682,6 +700,10 @@ class Drums(Layer):
         # Frame drum (low "doum" + slapped "tek"), hand claps and tambourine. No sidechain pumping.
         "tavern": dict(gain=2.4, kit="tavern", sidechain=False, mix=dict(snare=1.1, clap=0.5, hat=1.3, ohat=1.0),
                        swing=0.0, reverb=0.2),
+        # Italo: punchy kick, dry clap on 2+4, tight closed hats, rim on offbeats.
+        "italo": dict(kick=(0.8, 0.55, 1.4), snare=(210, 0.10, 0.7), hats=(0.025, 0.18, 0.9),
+                      mix=dict(snare=0.5, clap=1.5, hat=0.9, ohat=1.2), swing=0.0,
+                      hat_kind="hat", accent_kind="rim", gain=1.1),
     }
 
     # Where things go, per (steps per bar, steps per beat). 4/4 is the original groove.
@@ -704,6 +726,19 @@ class Drums(Layer):
         self.kit = None
         self.kicks = {}
 
+    # Builders for hat and accent slots — swap via hat_kind / accent_kind in a variant.
+    _HAT_BUILDERS = {
+        "hat":        lambda sr, g, v: dsp.hat(sr, g, v["hats"][0], v["hats"][2]),
+        "tambourine": lambda sr, g, v: dsp.tambourine(sr, g, 0.05),
+        "rim":        lambda sr, g, v: dsp.rim(sr, g),
+    }
+    _ACCENT_BUILDERS = {
+        "ohat":       lambda sr, g, v: dsp.hat(sr, g, v["hats"][1], v["hats"][2]),
+        "cowbell":    lambda sr, g, v: dsp.cowbell(sr, g, 0.18),
+        "rim":        lambda sr, g, v: dsp.rim(sr, g),
+        "tambourine": lambda sr, g, v: dsp.tambourine(sr, g, 0.18, shake=True),
+    }
+
     def _build(self, ctx):
         sr, g, v = ctx.sr, ctx.nprng, self.v
         if v.get("kit") == "tavern":
@@ -716,12 +751,13 @@ class Drums(Layer):
             }
             return
         tone, sdecay, sbright = v["snare"]
-        closed, opened, hbright = v["hats"]
+        hat_build   = self._HAT_BUILDERS[v.get("hat_kind", "hat")]
+        accent_build = self._ACCENT_BUILDERS[v.get("accent_kind", "ohat")]
         self.kit = {
             "snare": dsp.snare(sr, g, tone, sdecay, sbright),
-            "clap": dsp.clap(sr, g),
-            "hat": dsp.hat(sr, g, closed, hbright),
-            "ohat": dsp.hat(sr, g, opened, hbright),
+            "clap":  dsp.clap(sr, g),
+            "hat":   hat_build(sr, g, v),
+            "ohat":  accent_build(sr, g, v),
             "crash": dsp.crash(sr, g),
         }
 
@@ -734,6 +770,20 @@ class Drums(Layer):
                 punch, decay, drive = self.v["kick"]
                 self.kicks[midi] = dsp.kick(ctx.sr, dsp.midi_to_hz(midi), ctx.nprng, punch, decay, drive)
         return self.kicks[midi]
+
+    def set_hat(self, kind: str) -> None:
+        """Hot-swap the hat sound on the next bar. kind: 'hat', 'tambourine', 'rim'."""
+        if kind not in self._HAT_BUILDERS:
+            raise ValueError(f"hat_kind must be one of {list(self._HAT_BUILDERS)}, got {kind!r}")
+        self.v["hat_kind"] = kind
+        self.kit = None  # triggers rebuild on next bar
+
+    def set_accent(self, kind: str) -> None:
+        """Hot-swap the offbeat accent on the next bar. kind: 'ohat', 'cowbell', 'rim', 'tambourine'."""
+        if kind not in self._ACCENT_BUILDERS:
+            raise ValueError(f"accent_kind must be one of {list(self._ACCENT_BUILDERS)}, got {kind!r}")
+        self.v["accent_kind"] = kind
+        self.kit = None
 
     def on_bar(self, ctx, bar, offset):
         if self.kit is None:
@@ -863,6 +913,15 @@ class Bass(Layer):
             timbre=lambda b, lv: dsp.Wave(dsp.harmonic_amps(24, 0.3 + 0.4 * b),
                                           unison=((-24, 1.0), (-8, 0.8), (8, 0.8), (24, 1.0))),
         ),
+        "italo": dict(  # punchy gated 16ths: short gate, snappy attack, resonant peak tracks brightness
+            pattern="pulse", gate=0.45, env=(0.003, 0.08, 0.0, 0.04), saturate=3.5, gain=1.05,
+            timbre=lambda b, lv: dsp.Wave(
+                dsp.formant_amps(30, ((4.0 + 8.0 * b, 1.2),), tilt=0.65),
+                unison=((-8, 1.0), (8, 1.0)),
+                dark=dsp.harmonic_amps(5, 0.15),
+                morph=0.04,
+            ),
+        ),
     }
 
     def on_step(self, ctx, step, offset):
@@ -950,6 +1009,13 @@ class Stabs(Layer):
             env=(0.03, 0.3, 0.55, 0.2), length=2.0, saturate=2.0, gain=0.64,
             timbre=lambda b: dsp.Wave(dsp.harmonic_amps(4, 0.2), unison=((-7, 1.0), (0, 0.8), (7, 1.0)),
                                       dark=dsp.harmonic_amps(24, 0.6 + 0.35 * b), morph=0.08),
+        ),
+        "italo": dict(  # tight punchy chord stab: zero sustain, hard snap, wide supersaw; pure dancefloor
+            env=(0.003, 0.1, 0.0, 0.08), length=0.7, saturate=2.5, gain=1.15, echo=0.4,
+            timbre=lambda b: dsp.Wave(
+                dsp.harmonic_amps(30, 0.5 + 0.4 * b),
+                unison=((-18, 0.6), (-9, 1.0), (-3, 0.8), (0, 1.0), (3, 0.8), (9, 1.0), (18, 0.6)),
+            ),
         ),
     }
 
