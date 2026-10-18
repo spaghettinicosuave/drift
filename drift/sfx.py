@@ -640,6 +640,82 @@ def roll(sr, rng):
     return _noise(sr, dur, 200, 2500, rng) * bumps * np.sin(np.pi * t)
 
 
+# ------------------------------------------------------------------ water
+
+
+@recipe("splash_enter", level=-20)
+def splash_enter(sr, rng, depth=0.5):
+    """Body entering water: a sharp leading edge that opens into a falling curtain.
+    depth 0..1: 0 = ankle (wading in), 1 = full body (dive/swim entry)."""
+    dur = 0.55 + 0.25 * depth
+    n = int(sr * dur)
+    t = np.linspace(0, 1, n)
+
+    # initial crack: broadband burst, very short
+    crack = _noise(sr, 0.05, 600, 12000, rng) * _env(sr, 0.05, 0.002, 0.015)
+
+    # main spray: shaped noise falling off after the hit
+    spray_dur = 0.35 + 0.2 * depth
+    spray = _noise(sr, spray_dur, 200, 7000, rng) * _env(sr, spray_dur, 0.005, 0.12 + 0.06 * depth)
+
+    # low body thud under a deep entry
+    thud = _thud(sr, 0.2, 80 + 40 * (1 - depth), 40, 0.04 + 0.03 * depth, rng) * depth * 0.7
+
+    # bubbles trailing the entry: a loose cluster of modal resonances
+    freqs = [rng.uniform(300, 900) for _ in range(4)]
+    decays = [rng.uniform(0.01, 0.025) for _ in range(4)]
+    bubs = sum(_modes(sr, 0.3, [f], [d], [rng.uniform(0.4, 1.0)], rng) for f, d in zip(freqs, decays)) * 0.18
+
+    out = np.zeros(n)
+    _place(out, crack, 0, 1.0)
+    _place(out, spray, 0, 0.55 + 0.35 * depth)
+    _place(out, thud, 0, 1.0)
+    _place(out, bubs, int(0.04 * sr), 1.0)
+    return out
+
+
+@recipe("splash_exit", level=-23)
+def splash_exit(sr, rng):
+    """Stepping or pulling out of water: sheets running off, no leading crack."""
+    dur = 0.45
+    n = int(sr * dur)
+
+    sheets = _noise(sr, dur, 300, 6000, rng) * _env(sr, dur, 0.012, 0.18)
+    freqs = [rng.uniform(400, 1000) for _ in range(3)]
+    decays = [rng.uniform(0.012, 0.02) for _ in range(3)]
+    drips = sum(_modes(sr, 0.25, [f], [d], [rng.uniform(0.5, 1.0)], rng) for f, d in zip(freqs, decays)) * 0.15
+
+    out = np.zeros(n)
+    _place(out, sheets, 0, 0.7)
+    _place(out, drips, int(0.08 * sr), 1.0)
+    return out
+
+
+@recipe("swim_stroke", level=-24)
+def swim_stroke(sr, rng):
+    """One breast-stroke pull: arm enters, cups, and sweeps; water churns along the body."""
+    dur = 0.5
+    n = int(sr * dur)
+
+    # the hand entry: tight crack + immediate spray
+    entry = _noise(sr, 0.08, 500, 9000, rng) * _env(sr, 0.08, 0.003, 0.025)
+
+    # the pull: sustained lower churn as the arm sweeps back
+    pull_dur = 0.3
+    pull = _noise(sr, pull_dur, 150, 3000, rng) * _env(sr, pull_dur, 0.015, 0.10)
+
+    # turbulent bubbles along the body
+    freqs = [rng.uniform(250, 700) for _ in range(5)]
+    decays = [rng.uniform(0.008, 0.018) for _ in range(5)]
+    foam = sum(_modes(sr, 0.25, [f], [d], [rng.uniform(0.3, 0.8)], rng) for f, d in zip(freqs, decays)) * 0.12
+
+    out = np.zeros(n)
+    _place(out, entry, 0, 0.9)
+    _place(out, pull, int(0.03 * sr), 0.55)
+    _place(out, foam, int(0.02 * sr), 1.0)
+    return out
+
+
 # ------------------------------------------------------------------ the world
 
 
