@@ -691,29 +691,35 @@ def splash_exit(sr, rng):
     return out
 
 
-@recipe("swim_stroke", level=-24)
+@recipe("swim_stroke", level=-26)
 def swim_stroke(sr, rng):
-    """One breast-stroke pull: arm enters, cups, and sweeps; water churns along the body."""
-    dur = 0.5
+    """Sustained water-rush for swimming: three bandpass noise layers with slowly wandering
+    amplitudes that simulate a drifting spectral character. Designed to be retriggered at
+    ~2 s intervals; the 0.5 s tail overlaps the next play seamlessly."""
+    dur = 3.0
     n = int(sr * dur)
+    t = np.linspace(0, 1, n)
 
-    # the hand entry: tight crack + immediate spray
-    entry = _noise(sr, 0.08, 500, 9000, rng) * _env(sr, 0.08, 0.003, 0.025)
+    # Three noise layers covering low body-wash, mid turbulence, high surface hiss.
+    # Each uses a different LFO rate so their amplitudes drift out of phase, creating
+    # the impression of a slowly wandering bandpass cutoff.
+    low   = _noise(sr, dur, 120,  450, rng)  # deep body wash
+    mid   = _noise(sr, dur, 300, 1400, rng)  # mid turbulence
+    high  = _noise(sr, dur, 700, 3500, rng)  # bright surface hiss
 
-    # the pull: sustained lower churn as the arm sweeps back
-    pull_dur = 0.3
-    pull = _noise(sr, pull_dur, 150, 3000, rng) * _env(sr, pull_dur, 0.015, 0.10)
+    lfo_low  = 0.55 + 0.45 * np.sin(2 * np.pi * 0.29 * t * dur + rng.uniform(0, 2 * np.pi))
+    lfo_mid  = 0.55 + 0.45 * np.sin(2 * np.pi * 0.47 * t * dur + rng.uniform(0, 2 * np.pi))
+    lfo_high = 0.40 + 0.40 * np.sin(2 * np.pi * 0.61 * t * dur + rng.uniform(0, 2 * np.pi))
 
-    # turbulent bubbles along the body
-    freqs = [rng.uniform(250, 700) for _ in range(5)]
-    decays = [rng.uniform(0.008, 0.018) for _ in range(5)]
-    foam = sum(_modes(sr, 0.25, [f], [d], [rng.uniform(0.3, 0.8)], rng) for f, d in zip(freqs, decays)) * 0.12
+    mix = low * lfo_low * 0.7 + mid * lfo_mid * 1.0 + high * lfo_high * 0.5
 
-    out = np.zeros(n)
-    _place(out, entry, 0, 0.9)
-    _place(out, pull, int(0.03 * sr), 0.55)
-    _place(out, foam, int(0.02 * sr), 1.0)
-    return out
+    # Envelope: quick attack, flat sustain, long tail for seamless overlap on retrigger.
+    attack_s, tail_s = 0.12, 0.5
+    env = np.ones(n)
+    env[:int(attack_s * sr)] = np.linspace(0.0, 1.0, int(attack_s * sr))
+    env[int((dur - tail_s) * sr):] = np.linspace(1.0, 0.0, n - int((dur - tail_s) * sr))
+
+    return mix * env
 
 
 # ------------------------------------------------------------------ the world
