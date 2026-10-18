@@ -692,36 +692,30 @@ def splash_exit(sr, rng):
 
 
 knobs(
-    "swim_stroke",
-    # --- frequency bands (lo and hi edge of each layer) ---
+    "wind",
     low_lo=(120,   40,  400, "low layer: band low edge, Hz"),
     low_hi=(450,  150, 1200, "low layer: band high edge, Hz"),
     mid_lo=(300,  100,  800, "mid layer: band low edge, Hz"),
     mid_hi=(1400, 400, 4000, "mid layer: band high edge, Hz"),
     high_lo=(700,  200, 2000, "high layer: band low edge, Hz"),
     high_hi=(3500, 800, 9000, "high layer: band high edge, Hz"),
-    # --- per-layer gains ---
     low_gain=(0.7,  0.0, 2.0, "low layer level (x)"),
     mid_gain=(1.0,  0.0, 2.0, "mid layer level (x)"),
     high_gain=(0.5, 0.0, 2.0, "high layer level (x)"),
-    # --- LFO rates (Hz) ---
     lfo_low_rate=(0.29,  0.05, 2.0, "low layer LFO rate, Hz"),
     lfo_mid_rate=(0.47,  0.05, 2.0, "mid layer LFO rate, Hz"),
     lfo_high_rate=(0.61, 0.05, 2.0, "high layer LFO rate, Hz"),
-    # --- LFO depth (0 = flat, 1 = full on/off modulation) ---
     lfo_depth=(0.45, 0.0, 1.0, "LFO modulation depth (all layers)"),
-    # --- envelope ---
     attack=(0.12, 0.01, 0.5, "attack time, s"),
     tail=(0.5,   0.1, 1.5, "fade-out tail length, s"),
 )
 
 
-@recipe("swim_stroke", level=-26)
-def swim_stroke(sr, rng):
-    """Sustained water-rush for swimming: three bandpass noise layers with slowly wandering
-    amplitudes that simulate a drifting spectral character. Designed to be retriggered at
-    ~2 s intervals; the 0.5 s tail overlaps the next play seamlessly."""
-    k = tuned("swim_stroke")
+@recipe("wind", level=-26)
+def wind(sr, rng):
+    """Looping ambient wind: three bandpass noise layers with slowly wandering LFO amplitudes.
+    Good for beaches, deserts, canyons. Retrigger every ~2 s; 0.5 s fade tail overlaps cleanly."""
+    k = tuned("wind")
     dur = 3.0
     n = int(sr * dur)
     t = np.linspace(0, 1, n)
@@ -731,23 +725,70 @@ def swim_stroke(sr, rng):
     high = _noise(sr, dur, k.high_lo, k.high_hi, rng)
 
     depth = k.lfo_depth
-    lfo_low  = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_low_rate  * t * dur + rng.uniform(0, 2 * np.pi))
-    lfo_mid  = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_mid_rate  * t * dur + rng.uniform(0, 2 * np.pi))
-    lfo_high = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_high_rate * t * dur + rng.uniform(0, 2 * np.pi))
-    # keep LFOs non-negative so they act as amplitude modulation not ring mod
-    lfo_low  = np.clip(lfo_low,  0, None)
-    lfo_mid  = np.clip(lfo_mid,  0, None)
-    lfo_high = np.clip(lfo_high, 0, None)
+    lfo_low  = np.clip((1 - depth) + depth * np.sin(2 * np.pi * k.lfo_low_rate  * t * dur + rng.uniform(0, 2 * np.pi)), 0, None)
+    lfo_mid  = np.clip((1 - depth) + depth * np.sin(2 * np.pi * k.lfo_mid_rate  * t * dur + rng.uniform(0, 2 * np.pi)), 0, None)
+    lfo_high = np.clip((1 - depth) + depth * np.sin(2 * np.pi * k.lfo_high_rate * t * dur + rng.uniform(0, 2 * np.pi)), 0, None)
 
     mix = low * lfo_low * k.low_gain + mid * lfo_mid * k.mid_gain + high * lfo_high * k.high_gain
 
-    attack_s, tail_s = k.attack, k.tail
     env = np.ones(n)
-    env[:int(attack_s * sr)] = np.linspace(0.0, 1.0, int(attack_s * sr))
-    tail_start = max(0, n - int(tail_s * sr))
+    env[:int(k.attack * sr)] = np.linspace(0.0, 1.0, int(k.attack * sr))
+    tail_start = max(0, n - int(k.tail * sr))
     env[tail_start:] = np.linspace(1.0, 0.0, n - tail_start)
-
     return mix * env
+
+
+knobs(
+    "swim_stroke",
+    slap=(0.4,   0.0, 1.5, "hand-slap transient level (x)"),
+    slap_lo=(80,  40,  300, "slap body low, Hz"),
+    slap_hi=(500, 150, 1200, "slap body high, Hz"),
+    slap_decay=(0.035, 0.005, 0.12, "slap decay, s"),
+    bub_count=(6, 2, 16, "bubble count"),
+    bub_lo=(320,  80,  800, "bubble pitch low, Hz"),
+    bub_hi=(1100, 300, 3000, "bubble pitch high, Hz"),
+    bub_decay=(0.018, 0.004, 0.06, "bubble decay, s"),
+    bub_spread=(0.12, 0.01, 0.4, "bubble cluster spread, s"),
+    gurgle=(0.7,  0.0, 1.5, "subsurface gurgle level (x)"),
+    gurgle_lo=(60,  20,  200, "gurgle band low, Hz"),
+    gurgle_hi=(380, 100, 900, "gurgle band high, Hz"),
+    gurgle_decay=(0.22, 0.05, 0.6, "gurgle decay, s"),
+)
+
+
+@recipe("swim_stroke", level=-24)
+def swim_stroke(sr, rng):
+    """One swimming stroke: dull wet hand-slap, bubble cluster, subsurface gurgle.
+    Timed to the swim animation cycle (~0.6 s one-shot)."""
+    k = tuned("swim_stroke")
+    dur = 0.65
+    n = int(sr * dur)
+    out = np.zeros(n)
+
+    # hand slap: low-passed thud, very short, buried under bubbles
+    slap_n = int(sr * 0.08)
+    slap_t = np.arange(slap_n) / sr
+    slap = (_noise(sr, 0.08, k.slap_lo, k.slap_hi, rng)
+            * np.exp(-slap_t / k.slap_decay))
+    _place(out, slap, 0, k.slap)
+
+    # bubble cluster: randomised modal pops bunched in the first 200 ms
+    count = int(k.bub_count)
+    spread = k.bub_spread
+    for _ in range(count):
+        f = rng.uniform(k.bub_lo, k.bub_hi)
+        bub = _modes(sr, 0.08, [f], [k.bub_decay], [1.0], rng)
+        offset = int(rng.uniform(0.0, spread) * sr)
+        _place(out, bub, offset, rng.uniform(0.3, 1.0))
+
+    # subsurface gurgle: low turbulent noise fading out as the arm completes the pull
+    gurgle_n = int(sr * k.gurgle_decay * 4)
+    gurgle_t = np.arange(gurgle_n) / sr
+    gurgle = (_noise(sr, k.gurgle_decay * 4, k.gurgle_lo, k.gurgle_hi, rng)
+              * np.exp(-gurgle_t / k.gurgle_decay))
+    _place(out, gurgle, int(0.01 * sr), k.gurgle)
+
+    return out
 
 
 # ------------------------------------------------------------------ the world
