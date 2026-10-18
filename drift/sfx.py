@@ -691,33 +691,61 @@ def splash_exit(sr, rng):
     return out
 
 
+knobs(
+    "swim_stroke",
+    # --- frequency bands (lo and hi edge of each layer) ---
+    low_lo=(120,   40,  400, "low layer: band low edge, Hz"),
+    low_hi=(450,  150, 1200, "low layer: band high edge, Hz"),
+    mid_lo=(300,  100,  800, "mid layer: band low edge, Hz"),
+    mid_hi=(1400, 400, 4000, "mid layer: band high edge, Hz"),
+    high_lo=(700,  200, 2000, "high layer: band low edge, Hz"),
+    high_hi=(3500, 800, 9000, "high layer: band high edge, Hz"),
+    # --- per-layer gains ---
+    low_gain=(0.7,  0.0, 2.0, "low layer level (x)"),
+    mid_gain=(1.0,  0.0, 2.0, "mid layer level (x)"),
+    high_gain=(0.5, 0.0, 2.0, "high layer level (x)"),
+    # --- LFO rates (Hz) ---
+    lfo_low_rate=(0.29,  0.05, 2.0, "low layer LFO rate, Hz"),
+    lfo_mid_rate=(0.47,  0.05, 2.0, "mid layer LFO rate, Hz"),
+    lfo_high_rate=(0.61, 0.05, 2.0, "high layer LFO rate, Hz"),
+    # --- LFO depth (0 = flat, 1 = full on/off modulation) ---
+    lfo_depth=(0.45, 0.0, 1.0, "LFO modulation depth (all layers)"),
+    # --- envelope ---
+    attack=(0.12, 0.01, 0.5, "attack time, s"),
+    tail=(0.5,   0.1, 1.5, "fade-out tail length, s"),
+)
+
+
 @recipe("swim_stroke", level=-26)
 def swim_stroke(sr, rng):
     """Sustained water-rush for swimming: three bandpass noise layers with slowly wandering
     amplitudes that simulate a drifting spectral character. Designed to be retriggered at
     ~2 s intervals; the 0.5 s tail overlaps the next play seamlessly."""
+    k = tuned("swim_stroke")
     dur = 3.0
     n = int(sr * dur)
     t = np.linspace(0, 1, n)
 
-    # Three noise layers covering low body-wash, mid turbulence, high surface hiss.
-    # Each uses a different LFO rate so their amplitudes drift out of phase, creating
-    # the impression of a slowly wandering bandpass cutoff.
-    low   = _noise(sr, dur, 120,  450, rng)  # deep body wash
-    mid   = _noise(sr, dur, 300, 1400, rng)  # mid turbulence
-    high  = _noise(sr, dur, 700, 3500, rng)  # bright surface hiss
+    low  = _noise(sr, dur, k.low_lo,  k.low_hi,  rng)
+    mid  = _noise(sr, dur, k.mid_lo,  k.mid_hi,  rng)
+    high = _noise(sr, dur, k.high_lo, k.high_hi, rng)
 
-    lfo_low  = 0.55 + 0.45 * np.sin(2 * np.pi * 0.29 * t * dur + rng.uniform(0, 2 * np.pi))
-    lfo_mid  = 0.55 + 0.45 * np.sin(2 * np.pi * 0.47 * t * dur + rng.uniform(0, 2 * np.pi))
-    lfo_high = 0.40 + 0.40 * np.sin(2 * np.pi * 0.61 * t * dur + rng.uniform(0, 2 * np.pi))
+    depth = k.lfo_depth
+    lfo_low  = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_low_rate  * t * dur + rng.uniform(0, 2 * np.pi))
+    lfo_mid  = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_mid_rate  * t * dur + rng.uniform(0, 2 * np.pi))
+    lfo_high = (1 - depth) + depth * np.sin(2 * np.pi * k.lfo_high_rate * t * dur + rng.uniform(0, 2 * np.pi))
+    # keep LFOs non-negative so they act as amplitude modulation not ring mod
+    lfo_low  = np.clip(lfo_low,  0, None)
+    lfo_mid  = np.clip(lfo_mid,  0, None)
+    lfo_high = np.clip(lfo_high, 0, None)
 
-    mix = low * lfo_low * 0.7 + mid * lfo_mid * 1.0 + high * lfo_high * 0.5
+    mix = low * lfo_low * k.low_gain + mid * lfo_mid * k.mid_gain + high * lfo_high * k.high_gain
 
-    # Envelope: quick attack, flat sustain, long tail for seamless overlap on retrigger.
-    attack_s, tail_s = 0.12, 0.5
+    attack_s, tail_s = k.attack, k.tail
     env = np.ones(n)
     env[:int(attack_s * sr)] = np.linspace(0.0, 1.0, int(attack_s * sr))
-    env[int((dur - tail_s) * sr):] = np.linspace(1.0, 0.0, n - int((dur - tail_s) * sr))
+    tail_start = max(0, n - int(tail_s * sr))
+    env[tail_start:] = np.linspace(1.0, 0.0, n - tail_start)
 
     return mix * env
 
