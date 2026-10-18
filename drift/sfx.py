@@ -739,7 +739,7 @@ def wind(sr, rng):
 
 
 knobs(
-    "swim_stroke",
+    "water_bubbles",
     slap=(0.4,   0.0, 1.5, "hand-slap transient level (x)"),
     slap_lo=(80,  40,  300, "slap body low, Hz"),
     slap_hi=(500, 150, 1200, "slap body high, Hz"),
@@ -756,37 +756,106 @@ knobs(
 )
 
 
-@recipe("swim_stroke", level=-24)
-def swim_stroke(sr, rng):
-    """One swimming stroke: dull wet hand-slap, bubble cluster, subsurface gurgle.
-    Timed to the swim animation cycle (~0.6 s one-shot)."""
-    k = tuned("swim_stroke")
+@recipe("water_bubbles", level=-24)
+def water_bubbles(sr, rng):
+    """Earlier bubble attempt: hand-slap + modal pops + low gurgle. Kept as a starting point."""
+    k = tuned("water_bubbles")
     dur = 0.65
     n = int(sr * dur)
     out = np.zeros(n)
 
-    # hand slap: low-passed thud, very short, buried under bubbles
     slap_n = int(sr * 0.08)
     slap_t = np.arange(slap_n) / sr
     slap = (_noise(sr, 0.08, k.slap_lo, k.slap_hi, rng)
             * np.exp(-slap_t / k.slap_decay))
     _place(out, slap, 0, k.slap)
 
-    # bubble cluster: randomised modal pops bunched in the first 200 ms
     count = int(k.bub_count)
-    spread = k.bub_spread
     for _ in range(count):
         f = rng.uniform(k.bub_lo, k.bub_hi)
         bub = _modes(sr, 0.08, [f], [k.bub_decay], [1.0], rng)
-        offset = int(rng.uniform(0.0, spread) * sr)
+        offset = int(rng.uniform(0.0, k.bub_spread) * sr)
         _place(out, bub, offset, rng.uniform(0.3, 1.0))
 
-    # subsurface gurgle: low turbulent noise fading out as the arm completes the pull
     gurgle_n = int(sr * k.gurgle_decay * 4)
     gurgle_t = np.arange(gurgle_n) / sr
     gurgle = (_noise(sr, k.gurgle_decay * 4, k.gurgle_lo, k.gurgle_hi, rng)
               * np.exp(-gurgle_t / k.gurgle_decay))
     _place(out, gurgle, int(0.01 * sr), k.gurgle)
+
+    return out
+
+
+def _bubble_grain(sr, rng, f0, sweep_hz, grain_ms):
+    """One Farnell-model bubble grain.
+
+    Generates a short sine sweep (f0 → f0+sweep_hz over grain_ms), then
+    takes its sample-to-sample difference (np.diff). The derivative of a
+    swept sine is naturally a shaped, self-windowing grain — no explicit
+    envelope needed. This is the core trick from Designing Sound Practical 13.
+    """
+    n = max(3, int(sr * grain_ms / 1000))
+    t = np.arange(n) / sr
+    # instantaneous frequency rises quickly (bubble shrinks as it rises)
+    f = f0 + sweep_hz * (1 - np.exp(-t / (grain_ms / 1000 * 0.3)))
+    phase = 2 * np.pi * np.cumsum(f) / sr
+    sweep = np.sin(phase)
+    grain = np.diff(sweep)           # derivative → shaped pop, no extra envelope
+    return grain / (np.abs(grain).max() + 1e-12)
+
+
+knobs(
+    "swim_stroke",
+    # surface burst: dense high-pitched grains on hand entry
+    burst_count=(18,   6, 40,   "surface grain count"),
+    burst_f_lo=(900,  300, 2400, "surface grain freq low, Hz"),
+    burst_f_hi=(2200, 600, 4000, "surface grain freq high, Hz"),
+    burst_sweep=(180,  20, 600,  "surface grain pitch sweep, Hz"),
+    burst_ms=(3.5, 1.0, 10.0,   "surface grain length, ms"),
+    burst_spread=(0.06, 0.005, 0.2, "surface burst time spread, s"),
+    burst_gain=(1.0, 0.0, 2.0,  "surface burst level (x)"),
+    # subsurface pull: slower, lower-pitched grains as the arm sweeps back
+    pull_count=(10,  3, 24,    "pull grain count"),
+    pull_f_lo=(220,  60,  700,  "pull grain freq low, Hz"),
+    pull_f_hi=(700, 200, 1600,  "pull grain freq high, Hz"),
+    pull_sweep=(80,  10,  300,  "pull grain pitch sweep, Hz"),
+    pull_ms=(6.0,  2.0, 16.0,  "pull grain length, ms"),
+    pull_spread=(0.18, 0.02, 0.5, "pull grain time spread, s"),
+    pull_gain=(0.65, 0.0, 2.0, "pull level (x)"),
+    pull_delay=(0.02, 0.0, 0.12, "pull onset delay after entry, s"),
+)
+
+
+@recipe("swim_stroke", level=-24)
+def swim_stroke(sr, rng):
+    """Farnell-model swimming stroke: two cascading clouds of bubble grains.
+
+    Based on Designing Sound Practical 13 (Andy Farnell / MIT Press) and its
+    SuperCollider adaptation. Each 'bubble' is a short sine sweep whose
+    sample-to-sample derivative (np.diff) gives a naturally shaped pop grain.
+
+    Surface burst: dense, high-pitched grains fired at hand entry.
+    Pull layer: sparser, lower-pitched grains trailing as the arm sweeps back.
+    """
+    k = tuned("swim_stroke")
+    dur = 0.65
+    n = int(sr * dur)
+    out = np.zeros(n)
+
+    # surface burst — hand breaks the water, many small bubbles entrapped
+    for _ in range(int(k.burst_count)):
+        f0 = rng.uniform(k.burst_f_lo, k.burst_f_hi)
+        grain = _bubble_grain(sr, rng, f0, k.burst_sweep, k.burst_ms)
+        offset = int(rng.uniform(0.0, k.burst_spread) * sr)
+        _place(out, grain, offset, rng.uniform(0.4, 1.0) * k.burst_gain)
+
+    # pull layer — deeper, slower bubbles as the arm drags through
+    pull_start = int(k.pull_delay * sr)
+    for _ in range(int(k.pull_count)):
+        f0 = rng.uniform(k.pull_f_lo, k.pull_f_hi)
+        grain = _bubble_grain(sr, rng, f0, k.pull_sweep, k.pull_ms)
+        offset = pull_start + int(rng.uniform(0.0, k.pull_spread) * sr)
+        _place(out, grain, offset, rng.uniform(0.3, 0.8) * k.pull_gain)
 
     return out
 
