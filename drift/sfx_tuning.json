@@ -23,9 +23,36 @@
     "rattle_spread": 0.01,
     "rattle_tone": 1025.0
   },
+  "swim_stroke": {
+    "burst_count": 6.0,
+    "burst_f_hi": 1751.0,
+    "burst_f_lo": 607.0,
+    "burst_gain": 0.462,
+    "burst_ms": 9.169,
+    "burst_spread": 0.0785,
+    "burst_sweep": 600.0,
+    "high_cut": 2225.0,
+    "pitch": -6.46,
+    "pull_count": 24.0,
+    "pull_delay": 0.0402,
+    "pull_gain": 0.977,
+    "pull_ms": 15.62,
+    "pull_spread": 0.302,
+    "pull_sweep": 300.0
+  },
   "whinny": {
     "high_cut": 696.0,
     "low_cut": 1077.0,
     "pitch": -0.48
+  },
+  "swim_idle": {
+    "count": 5.0,
+    "f_lo": 607.0,
+    "f_hi": 1751.0,
+    "sweep": 600.0,
+    "grain_ms": 9.169,
+    "spread": 0.35,
+    "pitch": -6.46,
+    "high_cut": 2225.0
   }
 }
