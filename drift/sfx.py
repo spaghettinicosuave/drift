@@ -860,6 +860,35 @@ def swim_stroke(sr, rng):
     return out
 
 
+knobs(
+    "swim_idle",
+    count=(8,    2, 20,    "grain count"),
+    f_lo=(700,  200, 2000,  "grain freq low, Hz"),
+    f_hi=(1800, 500, 3500,  "grain freq high, Hz"),
+    sweep=(120,  10,  400,  "grain pitch sweep, Hz"),
+    grain_ms=(4.0, 1.0, 12.0, "grain length, ms"),
+    spread=(0.25, 0.02, 0.6,  "time spread, s"),
+)
+
+
+@recipe("swim_idle", level=-28)
+def swim_idle(sr, rng):
+    """Treading water: a sparse scatter of bubble grains, no pull layer.
+    Fired on a slow interval while the player floats without moving."""
+    k = tuned("swim_idle")
+    dur = 0.45
+    n = int(sr * dur)
+    out = np.zeros(n)
+
+    for _ in range(int(k.count)):
+        f0 = rng.uniform(k.f_lo, k.f_hi)
+        grain = _bubble_grain(sr, rng, f0, k.sweep, k.grain_ms)
+        offset = int(rng.uniform(0.0, k.spread) * sr)
+        _place(out, grain, offset, rng.uniform(0.2, 0.7))
+
+    return out
+
+
 # ------------------------------------------------------------------ the world
 
 
